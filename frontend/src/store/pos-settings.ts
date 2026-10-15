@@ -110,7 +110,7 @@ export const usePosSettingsStore = create<PosSettingsState>()(
       enforcePhoneLength: false,
       billingType: 'postpaid',
       tablesRequired: true,
-      language: 'en',
+      language: 'vi',
       // Printer defaults
       printerPaperSize: 'thermal58',
       printerEnabled: false,

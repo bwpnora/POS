@@ -32,9 +32,7 @@ import { usePrinterStore } from '@/hooks/usePrinter';
 import api from '@/lib/api';
 import toast from 'react-hot-toast';
 
-const SELECTABLE_LANGUAGES: Language[] = (Object.keys(LANGUAGES) as Language[]).filter(
-  (lang) => LANGUAGES[lang].selectable,
-);
+const SELECTABLE_LANGUAGES: Language[] = ['vi'];
 
 export type HwPrinter = {
   id: string;

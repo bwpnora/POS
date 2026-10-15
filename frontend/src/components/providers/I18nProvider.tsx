@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { IntlProvider } from 'use-intl';
 import { usePosSettingsStore } from '@/store/pos-settings';
-import { LANGUAGES, getBrowserLanguage, isLanguage, type Language } from '@/lib/i18n';
+import { LANGUAGES, isLanguage, type Language } from '@/lib/i18n';
 import { getCachedMessages, loadLocaleMessages } from '@/lib/i18n/loader';
 
 /** Wraps application in use-intl's IntlProvider with lazy-loaded messages,
@@ -15,17 +15,15 @@ function resolveInitialLanguage(): Language {
       if (raw) {
         const parsed = JSON.parse(raw);
         const savedLang = parsed?.state?.language;
-        if (isLanguage(savedLang)) {
+        if (savedLang === 'vi' && isLanguage(savedLang)) {
           return savedLang;
         }
       }
     } catch {
-      // Fall through to browser detection
+      // Fall through to Vietnamese default
     }
   }
-  const browser = getBrowserLanguage();
-  if (LANGUAGES[browser]) return browser;
-  return 'en';
+  return 'vi';
 }
 
 /** Error handler for IntlProvider suppressing ENVIRONMENT_FALLBACK warnings. */
@@ -43,10 +41,10 @@ export function getDefaultTimeZone(): string {
 
 export function I18nProvider({ children }: { children: ReactNode }) {
   const language = usePosSettingsStore((s) => s.language);
-  const [active, setActive] = useState<Language>('en');
-  const activeRef = useRef<Language>('en');
+  const [active, setActive] = useState<Language>(() => (getCachedMessages('vi') ? 'vi' : 'en'));
+  const activeRef = useRef<Language>(active);
 
-  // Resolve deterministic initial language (persisted > browser > en)
+  // Resolve deterministic initial language (Vietnamese default)
   // and synchronize with posSettingsStore.
   useEffect(() => {
     const initial = resolveInitialLanguage();
@@ -58,7 +56,7 @@ export function I18nProvider({ children }: { children: ReactNode }) {
   // Sync rendered messages with store language; ignore stale loads
   // and revert store on failed fetch.
   useEffect(() => {
-    if (language === activeRef.current) return;
+    if (language === activeRef.current && getCachedMessages(language)) return;
     let cancelled = false;
     loadLocaleMessages(language)
       .then(() => {
@@ -70,7 +68,10 @@ export function I18nProvider({ children }: { children: ReactNode }) {
       .catch((err: unknown) => {
         if (cancelled) return;
         if (usePosSettingsStore.getState().language !== language) return; // superseded
-        console.warn(`[i18n] Failed to load messages for "${language}" — staying on "${activeRef.current}".`, err);
+        console.warn(
+          `[i18n] Failed to load messages for "${language}" — staying on "${activeRef.current}".`,
+          err,
+        );
         usePosSettingsStore.setState({ language: activeRef.current });
       });
     return () => {
@@ -78,8 +79,10 @@ export function I18nProvider({ children }: { children: ReactNode }) {
     };
   }, [language]);
 
-  const config = LANGUAGES[active] ?? LANGUAGES.en;
-  const messages = getCachedMessages(active) ?? getCachedMessages('en') ?? {};
+  const effectiveLang = getCachedMessages(language) ? language : active;
+  const config = LANGUAGES[effectiveLang] ?? LANGUAGES.vi;
+  const messages =
+    getCachedMessages(effectiveLang) ?? getCachedMessages('vi') ?? getCachedMessages('en') ?? {};
 
   return (
     <IntlProvider

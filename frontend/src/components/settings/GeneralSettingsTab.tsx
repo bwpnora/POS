@@ -26,9 +26,7 @@ import { LANGUAGES, TENANT_STATUS_LABEL_KEYS, type Language } from '@/lib/i18n';
 import api from '@/lib/api';
 import toast from 'react-hot-toast';
 
-const SELECTABLE_LANGUAGES: Language[] = (Object.keys(LANGUAGES) as Language[]).filter(
-  (lang) => LANGUAGES[lang].selectable,
-);
+const SELECTABLE_LANGUAGES: Language[] = ['vi'];
 
 const BUSINESS_DAY_START_OPTIONS = [
   { value: '00:00', label: '00:00 (12:00 AM)' },

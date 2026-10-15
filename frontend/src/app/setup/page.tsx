@@ -33,7 +33,7 @@ import {
 import { TimeZoneSelect } from '@/components/TimeZoneSelect';
 import { CurrencySelect } from '@/components/CurrencySelect';
 import { useLocale, useTranslations, type AppConfig } from 'use-intl';
-import { LANGUAGES, getBrowserLanguage, type Language } from '@/lib/i18n';
+import { LANGUAGES, type Language } from '@/lib/i18n';
 
 type SetupProfile = 'empty' | 'express' | 'demo';
 type ServiceModel = 'qsr' | 'finedine';
@@ -60,10 +60,7 @@ const SERVICE_MODEL_KEYS = {
   finedine: { label: 'finedineLabel', desc: 'finedineDesc', details: 'finedineDetails' },
 } as const satisfies Record<ServiceModel, { label: SetupKey; desc: SetupKey; details: SetupKey }>;
 
-// Registry-derived selectable languages (derived from LANGUAGES registry where selectable: true).
-const SELECTABLE_LANGUAGES: Language[] = (Object.keys(LANGUAGES) as Language[]).filter(
-  (lang) => LANGUAGES[lang].selectable,
-);
+const SELECTABLE_LANGUAGES: Language[] = ['vi'];
 
 // Mirrors main/services/cloud-sync.ts DEFAULT_CLOUD_SERVER_URL — kept in sync
 // manually since the frontend can't import backend TS modules directly.
@@ -98,7 +95,7 @@ export default function SetupPage() {
   // Wizard language follows shared store to update translations immediately.
   const language = usePosSettingsStore((s) => s.language);
   const setStoreLanguage = usePosSettingsStore((s) => s.setLanguage);
-  const [browserLanguage, setBrowserLanguage] = useState<Language>('en');
+  const [browserLanguage, setBrowserLanguage] = useState<Language>('vi');
   // No default country: regional settings come only from what the owner
   // selects here (docs/reference/product-invariants.md, "Regional settings come from
   // signup, never from a fallback").
@@ -160,7 +157,7 @@ export default function SetupPage() {
   useEffect(() => {
     const frame = window.requestAnimationFrame(() => {
       setMounted(true);
-      setBrowserLanguage(getBrowserLanguage());
+      setBrowserLanguage('vi');
     });
     let mountedFlag = true;
     api

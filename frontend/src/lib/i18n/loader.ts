@@ -9,6 +9,9 @@ const messageCache = new Map<Language, Messages>();
 const inFlightPromises = new Map<Language, Promise<Messages>>();
 
 messageCache.set('en', en as Messages);
+if (typeof window !== 'undefined') {
+  void loadLocaleMessages('vi');
+}
 
 /** Synchronously cached messages for a language (undefined until loaded). */
 export function getCachedMessages(lang: Language): Messages | undefined {

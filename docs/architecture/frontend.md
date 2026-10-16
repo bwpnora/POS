@@ -463,15 +463,23 @@ against `en.json`, the derived print-label table, and a `tsc` pass over the fron
 orders in a Preparing column (`pending`, `preparing`) and a Ready column (`ready`). It re-reads
 `GET /settings/customer-display` on every poll, so changes made in Settings > Kitchen Display apply
 without reloading the board. The tenant-wide config sets which statuses show, the refresh interval,
-and whether the last-updated time is shown. The same settings card shows the display URL with copy
+and whether the last-updated time is shown. At desktop widths, each column renders complete bill or
+order numbers in readable rows and independently rotates measured pages every ten seconds when
+needed. Newly ready orders take priority on the next rotation, interleaved with existing pages. At
+narrow widths the rows remain in one scrollable flow. A failed poll retains the last successful
+orders and reports that the feed is stale. The same settings card shows the display URL with copy
 and open actions. Strings come from the `customerDisplay` message namespace.
 
 An owner or manager can also pair a standalone device (a TV or tablet browser) from the same card.
-Pairing creates a token and shows a `/customer-display/#token=...` link once. The board moves the
-token from the URL fragment into `localStorage` and polls `GET /api/customer-display/feed` with it
-instead of using a staff session, so it needs no login and can read nothing but order numbers and
-statuses. When the feed answers `401` (the token was revoked), the board clears the stored token and
-shows an unpaired screen.
+The card loads the POS server's LAN addresses and uses the selected address for both the display URL
+and pairing link. The primary LAN address is selected first; other network interfaces, mDNS, and a
+clearly labelled local preview can be selected before pairing. Switching addresses updates the
+one-time link without creating another token. If no LAN address is available, the card says so and
+offers only the local preview; if address lookup fails, it shows an error and retry action. The board
+moves the token from the URL fragment into `localStorage` and polls
+`GET /api/customer-display/feed` with it instead of using a staff session, so it needs no login and
+can read nothing but order numbers and statuses. When the feed answers `401` (the token was
+revoked), the board clears the stored token and orders, then shows an unpaired screen.
 
 ## Tech stack
 

@@ -278,17 +278,18 @@ and settlement - is in [Order lifecycle](../architecture/order-lifecycle.md).
 
 | Method | Path | Authorization | Parameters | Response |
 | --- | --- | --- | --- | --- |
-| `GET` | `/` | `orders.read` (default roles: `ROLE_ACCESS.sales`) + order read limiter | query: `?status`, `?type`, `?today`, `?start_date`, `?end_date`, `?table_id`, `?before_id`, `?per_page`, `?search` | `{ orders, nextCursor? }`, newest page first. `?before_id` pages backwards. `?search` matches order number, customer name, or phone before pagination. |
+| `GET` | `/` | `orders.read` (default roles: `ROLE_ACCESS.sales`) + order read limiter | query: `?view`, `?status`, `?type`, `?today`, `?start_date`, `?end_date`, `?table_id`, `?before_id`, `?per_page`, `?search` | `{ orders, nextCursor? }`, newest page first. `view` accepts `all`, `active`, or `unpaid` and defaults to `all`; `active` includes non-cancelled in-progress orders and completed orders with pending, preparing, or ready kitchen items while KDS is enabled; `unpaid` includes unbilled orders and orders with an unpaid or partial bill with a positive balance, excluding cancelled orders. Status, type, table, view, date, and search filters apply before pagination. `?before_id` pages backwards using the numeric id cursor and stable `created_at`, `id` ordering. `?search` matches order number, customer name, or phone. The Orders screen requests 15 matches per page; the API default remains 50. |
 | `GET` | `/:id` | `orders.read` (default roles: `ROLE_ACCESS.sales`) + order read limiter | path: `id` | `{ ...order, items, table }`. |
 | `POST` | `/` | `ROLE_ACCESS.sales` + order write limiter | body: `items`, `table_id`, `customer_id`, `type`, `guest_count`, `special_instructions`, `packaging_charge`, `delivery_charge`, `service_charge`, `online_platform`, `external_order_id`, `delivery_address`, `expected_payment_method`, `expected_payment_method_id`, `delivery_note`; header: `Idempotency-Key` | `201` with the created order. Repeating the same request body with an `Idempotency-Key` returns its stored response; reusing the key with a different body returns `409`. `expected_payment_method` and `delivery_note` are stored only for `type: 'delivery'`: without an id, the method keeps its legacy string/sentinel resolution (`unknown` by default, `pending`, `cash`, `card`, or an active custom method name), and is never recorded as a payment; `400` for any other method or a note over 200 characters. A custom method whose name matches a built-in or sentinel needs its id to be identified as custom. An optional `expected_payment_method_id` must be a positive safe integer naming an **active** configured method; the server stores its canonical name and requires any supplied non-empty name to match case-insensitively. Invalid, unknown, or inactive ids return `400`. The id is a historical marker, not a foreign key, so renaming or deleting the method later never rewrites an order; only `orders.expected_payment_method_id` decides that the stored name prints literally on a delivery slip. Non-delivery orders persist both expected-method fields as `null`. An item's `variant_id` is required when the product has active variants, and `400` when it names an unknown, foreign, or inactive variant; `unit_price` is never taken from the client. |
 | `POST` | `/:id/items` | `ROLE_ACCESS.sales` + order write limiter | path: `id`; body: `items`, `special_instructions`; header: `Idempotency-Key` | Appends items and returns the recomputed order. Honours `Idempotency-Key`. Items resolve a `variant_id` under the same rules as order creation, priced with `variant.online_price` when the order carries an `online_platform`. |
-| `PATCH` | `/:id/status` | `ROLE_ACCESS.orderStatus` + order write limiter | path: `id`; body: `status`, `reason`, `override_pin`, `free_table` | Order-level transition. Allowed targets: `pending` to `preparing`, `ready`, `served`, `completed`, `cancelled`; `preparing` to `ready`, `served`, `completed`, `cancelled`; `ready` to `served`, `completed`, `cancelled`; `served` to `completed`, `cancelled`. `completed` and `cancelled` are terminal. Repeating the current status is a no-op. |
+| `PATCH` | `/:id/status` | `orders.status.update` (default roles: `ROLE_ACCESS.orderStatus`) + order write limiter | path: `id`; body: `status`, `reason`, `override_pin`, `free_table`, `approver_id`, `manager_id` | Order-level transition. Allowed targets: `pending` to `preparing`, `ready`, `served`, `completed`, `cancelled`; `preparing` to `ready`, `served`, `completed`, `cancelled`; `ready` to `served`, `completed`, `cancelled`; `served` to `completed`, `cancelled`. `completed` and `cancelled` are terminal. Repeating the current status is a no-op. See the status safeguard rules below. |
 | `PATCH` | `/:id/customer` | `ROLE_ACCESS.ownerManager` + order write limiter | path: `id`; body: `customer_id` | - |
 | `PATCH` | `/:id/convert-to-takeaway` | `ROLE_ACCESS.sales` + order write limiter | path: `id` | - |
 | `PATCH` | `/:id/discount` | `ROLE_ACCESS.ownerManagerCashier` + order write limiter | path: `id`; body: `discount_type`, `discount_value`, `discount_reason`, `override_pin` | - |
-| `PATCH` | `/:id/items/:itemId/discount` | `ROLE_ACCESS.ownerManagerCashier` + order write limiter | path: `id`, `itemId`; body: `discount_type`, `discount_value`, `override_pin` | - |
+| `PATCH` | `/:id/items/:itemId/discount` | `ROLE_ACCESS.ownerManagerCashier` + order write limiter | path: `id`, `itemId`; body: `discount_type`, `discount_value`, `override_pin` | Returns `{ item }` with updated `edit_version`. |
 | `PATCH` | `/:orderId/items/:itemId/cancel` | any authenticated role + item cancel limiter, then an in-handler permission check | path: `orderId`, `itemId`; body: `override_pin`, `reason`, `manager_id` | See the note below. Returns `{ order: { ...order, items } }`. |
-| `PATCH` | `/:orderId/items/:itemId/restore` | in-handler `orders.item.restore` (shipped to `ROLE_ACCESS.ownerManager`) | path: `orderId`, `itemId` | Returns `{ order: { ...order, items } }`. `400` on a completed or cancelled order or a paid one. Re-deducts inventory and recipe components, and rescales an order-level percentage discount. |
+| `PATCH` | `/:orderId/items/:itemId/edit` | `orders.item.edit` (shipped to `ROLE_ACCESS.owner`) + order write limiter | path: `orderId`, `itemId`; header: `Idempotency-Key`; body: `expected_edit_version` (non-negative integer matching the item's `edit_version`, derived from the latest `order_audit_log.id` for the item or `0`), and exactly one of `quantity` or `replacement` (`product_id`, `quantity`, optional `variant_id`, `modifier_selection`, `addons`, `special_instructions`), optional `reason` | Returns `{ order: { ...order, items } }` where hydrated items carry `edit_version` and, on `cancelled` or `voided` rows marked `superseded: true` in `item_edited`, `superseded: true`. Honours `Idempotency-Key` (replaying a matching key + request before stale-version or terminal-item checks, `409` on key reuse with a different request) and rejects a stale `expected_edit_version` with `409`. On a `pending` line, restores recorded product/add-on/recipe stock once, cancels the old line as superseded (`superseded: true`), and inserts and deducts the new `pending` line; the new line keeps the stored variant and add-on selections even if the catalog has since disabled them (reductions preserve stored selections and scale historical recipe snapshots and inventory deductions onto the new pending line; replacements and increases re-validate against the current catalog, and the carried `variant_selection` snapshot is persisted verbatim). On a line the kitchen already started (`preparing`, `ready`, `served`), a quantity increase keeps the original line and inserts/deducts only the extra units as a new `pending` line (`superseded: false`); a quantity decrease updates the existing line's billable quantity in place without restoring or re-deducting stock, scaling its held `inventory_deducted_quantity`, add-on deductions, and `recipe_snapshot` to the remaining quantity so wasted units stay out of available stock, while preserving its kitchen status and stored unit/add-on prices and recording `wasted_quantity` in `item_edited`; product replacement is disallowed once kitchen preparation has started (`400`). Re-syncs unpaid and partially paid bills. `409` on a split, paid, or refunded order, or when the new total falls below the amount already collected. Audited as `item_edited`. |
+| `PATCH` | `/:orderId/items/:itemId/restore` | in-handler `orders.item.restore` (shipped to `ROLE_ACCESS.ownerManager`) | path: `orderId`, `itemId` | Returns `{ order: { ...order, items } }`. `400` on a completed, cancelled, or paid order, or when the cancelled line was superseded by an item edit. Re-deducts inventory and recipe components, and rescales an order-level percentage discount. |
 
 Order creation and item append accept an optional version-4 UUID `X-Operation-ID` correlation
 header. A validation rejection with a registered failure point includes `reason_code`, `operation`, `stage`,
@@ -296,10 +297,36 @@ header. A validation rejection with a registered failure point includes `reason_
 present. A valid supplied UUID is returned as the correlation id, otherwise the server generates
 one. Failures without a registered tuple may retain the `{ error }` response.
 
-Both item endpoints resolve the caller's effective permissions from the database inside a `withTxn`
-(deferred, not immediate) transaction rather than from the JWT claim, and re-run every policy check
-there. Each opens the single transaction scope it runs in; the route does not wrap the handler
-again.
+`PATCH /:id/status` evaluates order, bill/payment, and kitchen state inside the transaction:
+
+- Ordinary `completed` transitions require every payable bill for the order to be settled (`paid` with
+  zero unpaid balance) and billed totals (accounting for `round_off`) to cover `order.total`. An
+  unbilled positive-total order is not considered paid. When
+  `require_kitchen_delivered_before_settlement` is enabled (`kds_enabled` not `false` and
+  `billing_type` not `prepaid`), any item still in `pending`, `preparing`, or `ready` also blocks
+  ordinary completion.
+- When unsettled payment or the applicable kitchen-delivery requirement blocks `completed`, an
+  explicit `override_pin` from an active `owner` or `manager` holding `orders.status.update` (plus
+  `payments.take` when overriding unsettled payment) is required (`400` when missing, `403` when
+  invalid or unauthorized, `429` after 5 failed attempts). Being logged in as an owner or manager
+  does not bypass `override_pin`. Overriding completion never marks bills paid, erases balances, or
+  creates payment records.
+- `cancelled` transitions require an explicit `override_pin` from an active `owner` or `manager`
+  holding `orders.status.update` and `orders.item.cancel` whenever the order has advanced past
+  `pending`, any item is in `preparing`, `ready`, `served`, or `completed`, or any bill holds
+  recorded collected funds. Cancellation preserves bill payment and refund records (refunds remain a
+  separate operation via `/api/refunds`) and restores product, variant, add-on, and recipe stock
+  only for items still in `pending` status.
+- When `approver_id` (or `manager_id`) is supplied on an overridden transition, PIN verification is
+  restricted to that active user. Every overridden `status_changed` audit log entry records
+  `actor_user_id`, `approved_by`, `overridden_safeguards`, `bill_ids`, `outstanding_amount`,
+  `outstanding_amounts`, and `collected_amount` (plus `undelivered_items` when overriding kitchen
+  delivery), and never records the PIN.
+
+`PATCH .../cancel` and `PATCH .../restore` resolve the caller's effective permissions from the
+database inside a `withTxn` (deferred, not immediate) transaction rather than from the JWT claim,
+and re-run every policy check there. Each opens the single transaction scope it runs in; the route
+does not wrap the handler again.
 
 `PATCH .../cancel` is a policy switch, not a plain status write:
 
@@ -377,8 +404,12 @@ Router: `main/routes/expenses.ts`. Full path: `/api/expenses`. Reads need `expen
 creation, voiding, and replacement need `expenses.manage` **and** `expenses.view`, while payment and
 reversal mutations need `expenses.pay` and `expenses.reverse` (alongside `expenses.view`, plus
 `cash.movements.manage` for cash methods) so an actor can always read back the row they touched.
-Amounts are integer minor units in the expense's own `currency_code`; no endpoint converts currencies
-or assumes a minor-unit factor.
+Amounts are positive safe-integer minor units in the expense's own `currency_code`; no endpoint
+converts currencies or assumes a minor-unit factor. Active incurred totals per currency (after
+subtracting the replaced source on replacement) and returned aggregate totals must fit within
+`Number.MAX_SAFE_INTEGER`, or the operation fails with `422 amount_range_exceeded`; legacy rows with
+an out-of-range stored amount project `amount_minor` and `due_minor` as `null` so list, detail, and
+recovery mutations stay usable without rounding.
 
 | Method | Path | Authorization | Parameters | Response |
 | --- | --- | --- | --- | --- |
